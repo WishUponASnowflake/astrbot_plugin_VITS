@@ -241,7 +241,7 @@ class VITSPlugin(Star):
         
         if len(parts) < 2:
             # 显示当前概率设置
-            yield event.plain_result(f"当前TTS转换概率：{self.tts_probability}%\n\n使用方法：/vits% <概率值>\n\n示例：\n/vits% 50  # 设置50%概率\n/vits% 100 # 设置100%概率（每次都转换）\n/vits_prob 0   # 设置0%概率（从不转换）")
+            yield event.plain_result(f"当前TTS转换概率：{self.tts_probability}%\n\n使用方法：/vits% <概率值>\n\n示例：\n/vits% 50  # 设置50%概率\n/vits% 100 # 设置100%概率（每次都转换）\n/vits% 0   # 设置0%概率（从不转换）")
             return
         
         try:
