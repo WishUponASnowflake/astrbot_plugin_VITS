@@ -2,7 +2,8 @@
     "url": {
         "description": "API URL",
         "type": "string",
-        "hint": "请输入API的URL地址"
+        "hint": "请输入API的URL地址",
+        "default": "https://api.siliconflow.cn/v1"
     },
     "apikey": {
         "description": "API Key",
@@ -12,11 +13,24 @@
     "name": {
         "description": "模型名称",
         "type": "string",
-        "hint": "请输入模型的名称"
+        "hint": "请输入模型的名称，如：FunAudioLLM/CosyVoice2-0.5B",
+        "default": "FunAudioLLM/CosyVoice2-0.5B"
     },
     "voice": {
-        "description": "音色名称",
+        "description": "音色配置",
         "type": "string",
-        "hint": "请输入音色的名称"
+        "hint": "系统预置音色：模型名:音色名（如：FunAudioLLM/CosyVoice2-0.5B:alex）；自定义音色：speech:音色名:ID:哈希值"
+    },
+    "skip_tts_keywords": {
+        "description": "跳过TTS的关键词列表",
+        "type": "list",
+        "hint": "当回复包含这些关键词时，将跳过语音转换，直接回复文字（不区分大小写）",
+        "default": ["astrbot", "https", "http", "www.", ".com", ".cn", "链接", "网址", "模型", "查询", "入群", "退群", "涩图", "语音", "音色"]
+    },
+    "tts_probability": {
+        "description": "TTS转换概率",
+        "type": "int",
+        "hint": "设置语音转换的概率，范围0-100。100表示每次都转换，50表示50%概率转换，0表示从不转换",
+        "default": 100
     }
 }
