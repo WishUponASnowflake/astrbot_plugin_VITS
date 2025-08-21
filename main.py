@@ -241,7 +241,7 @@ class VITSPlugin(Star):
         
         if len(parts) < 2:
             # 显示当前概率设置
-            yield event.plain_result(f"当前TTS转换概率：{self.tts_probability}%\n\n使用方法：/vits_prob <概率值>\n\n示例：\n/vits_prob 50  # 设置50%概率\n/vits_prob 100 # 设置100%概率（每次都转换）\n/vits_prob 0   # 设置0%概率（从不转换）")
+            yield event.plain_result(f"当前TTS转换概率：{self.tts_probability}%\n\n使用方法：/vits% <概率值>\n\n示例：\n/vits% 50  # 设置50%概率\n/vits% 100 # 设置100%概率（每次都转换）\n/vits_prob 0   # 设置0%概率（从不转换）")
             return
         
         try:
@@ -263,7 +263,7 @@ class VITSPlugin(Star):
                 yield event.plain_result(f"已设置TTS转换概率为{new_probability}%，大约{new_probability}%的消息会转换为语音。")
                 
         except ValueError:
-            yield event.plain_result("请输入有效的数字！\n\n示例：/vits_prob 50")
+            yield event.plain_result("请输入有效的数字！\n\n示例：/vits% 50")
 
     async def _create_speech_request(self, plain_text: str, output_audio_path: Path):
         """创建语音合成请求"""
