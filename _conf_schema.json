@@ -25,7 +25,7 @@
         "description": "跳过TTS的关键词列表",
         "type": "list",
         "hint": "当回复包含这些关键词时，将跳过语音转换，直接回复文字（不区分大小写）",
-        "default": ["astrbot", "https", "http", "www.", ".com", ".cn", "链接", "网址", "模型", "查询", "入群", "退群", "涩图", "语音", "音色"]
+        "default": ["astrbot", "%", "http", "www.", ".com", ".cn", "链接", "网址", "模型", "查询", "入群", "退群", "涩图", "语音", "音色"]
     },
     "tts_probability": {
         "description": "TTS转换概率",
