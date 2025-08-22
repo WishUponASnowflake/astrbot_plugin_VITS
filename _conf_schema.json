@@ -25,12 +25,30 @@
         "description": "跳过TTS的关键词列表",
         "type": "list",
         "hint": "当回复包含这些关键词时，将跳过语音转换，直接回复文字（不区分大小写）",
-        "default": ["astrbot", "%", "http", "www.", ".com", ".cn", "链接", "网址", "模型", "查询", "入群", "退群", "涩图", "语音", "音色"]
+        "default": ["astrbot", "https", "http", "www.", ".com", ".cn", "链接", "网址", "入群", "退群", "涩图", "语音", "音色", "TTS", "tts", "转换"]
     },
     "tts_probability": {
         "description": "TTS转换概率",
         "type": "int",
         "hint": "设置语音转换的概率，范围0-100。100表示每次都转换，50表示50%概率转换，0表示从不转换",
         "default": 100
+    },
+    "speed": {
+        "description": "音频播放速度",
+        "type": "float",
+        "hint": "控制音频播放速度，float类型，默认值是1.0，可选范围是[0.25,4.0]",
+        "default": 1.0
+    },
+    "gain": {
+        "description": "音频增益",
+        "type": "float",
+        "hint": "音频增益，单位dB，控制音频声音大小，float类型，默认值是0.0，可选范围是[-10,10]",
+        "default": 0.0
+    },
+    "global_enabled": {
+        "description": "全局TTS状态保存",
+        "type": "bool",
+        "hint": "控制TTS功能的全局开关状态，开启后则不会因为重启框架或重载插件而改变状态",
+        "default": true
     }
 }
