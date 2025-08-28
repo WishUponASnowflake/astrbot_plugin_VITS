@@ -8,20 +8,60 @@ import re
 import aiohttp
 import json
 import random
+import os
 
 # 注册插件的装饰器
-@register("VITSPlugin", "第九位魔神/Chris95743", "语音合成插件", "1.3.0")
+@register("VITSPlugin", "第九位魔神/Chris95743", "语音合成插件", "1.4.0")
 class VITSPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
         self.config = config
+        self.context = context  # 保存context引用用于配置更新
         self.api_url = config.get('url', '')  # 提取 API URL
         self.api_key = config.get('apikey', '')  # 提取 API Key
         self.api_name = config.get('name', '')  # 提取 模型 名称
         self.api_voice = config.get('voice', '')  # 提取角色名称
         self.skip_tts_keywords = config.get('skip_tts_keywords', [])  # 跳过TTS的关键词
         self.tts_probability = config.get('tts_probability', 100)  # TTS转换概率
-        self.enabled = False  # 初始化插件开关为关闭状态
+        self.speed = config.get('speed', 1.0)  # 音频播放速度
+        self.gain = config.get('gain', 0.0)  # 音频增益
+        self.enabled = config.get('global_enabled', False)  # 从配置读取全局开关状态
+
+    def _save_global_enabled_state(self, enabled: bool):
+        """保存全局启用状态到配置"""
+        try:
+            # 更新内存中的配置
+            self.config['global_enabled'] = enabled
+            
+            if hasattr(self.context, 'save_config'):
+                self.context.save_config(self.config)
+            elif hasattr(self.context, 'update_config'):
+                self.context.update_config('global_enabled', enabled)
+            else:
+                # 如果context没有提供保存方法，我们尝试直接写入配置文件
+                config_dir = Path(__file__).parent
+                config_file = config_dir / "config.json"
+                
+                # 读取现有配置
+                existing_config = {}
+                if config_file.exists():
+                    try:
+                        with open(config_file, 'r', encoding='utf-8') as f:
+                            existing_config = json.load(f)
+                    except:
+                        pass
+                
+                # 更新配置
+                existing_config['global_enabled'] = enabled
+                
+                # 写入配置文件
+                with open(config_file, 'w', encoding='utf-8') as f:
+                    json.dump(existing_config, f, ensure_ascii=False, indent=2)
+                    
+                logging.info(f"已保存TTS全局开关状态: {enabled}")
+                
+        except Exception as e:
+            logging.error(f"保存TTS开关状态失败: {e}")
 
     @filter.command("vits", priority=1)
     async def vits(self, event: AstrMessageEvent):
@@ -35,10 +75,14 @@ class VITSPlugin(Star):
             user_name = "用户"
             
         self.enabled = not self.enabled
+        
+        # 保存状态到配置文件
+        self._save_global_enabled_state(self.enabled)
+        
         if self.enabled:
-            yield event.plain_result(f"启用语音插件, {user_name}")
+            yield event.plain_result(f"启用语音插件, {user_name} (已保存到配置)")
         else:
-            yield event.plain_result(f"禁用语音插件, {user_name}")
+            yield event.plain_result(f"禁用语音插件, {user_name} (已保存到配置)")
 
     @filter.command("voices", priority=1)
     async def vits_voices(self, event: AstrMessageEvent):
@@ -241,7 +285,14 @@ class VITSPlugin(Star):
         
         if len(parts) < 2:
             # 显示当前概率设置
-            yield event.plain_result(f"当前TTS转换概率：{self.tts_probability}%\n\n使用方法：/vits_prob <概率值>\n\n示例：\n/vits_prob 50  # 设置50%概率\n/vits_prob 100 # 设置100%概率（每次都转换）\n/vits_prob 0   # 设置0%概率（从不转换）")
+            # 为帮助信息创建简化版本，避免关键词触发跳过逻辑
+            help_text = f"当前TTS转换概率：{self.tts_probability}%\n\n"
+            help_text += "使用方法：/vits% <概率值>\n\n"
+            help_text += "示例：\n"
+            help_text += "/vits% 50  # 设置50%概率\n"
+            help_text += "/vits% 100 # 设置100%概率（每次都转换）\n" 
+            help_text += "/vits% 0   # 设置0%概率（从不转换）"
+            yield event.plain_result(help_text)
             return
         
         try:
@@ -263,58 +314,156 @@ class VITSPlugin(Star):
                 yield event.plain_result(f"已设置TTS转换概率为{new_probability}%，大约{new_probability}%的消息会转换为语音。")
                 
         except ValueError:
-            yield event.plain_result("请输入有效的数字！\n\n示例：/vits_prob 50")
+            yield event.plain_result("请输入有效的数字！\n\n示例：/vits% 50")
+
+    @filter.command("speed", priority=1)
+    async def set_speed(self, event: AstrMessageEvent):
+        """设置音频播放速度"""
+        # 获取命令参数
+        message_text = event.get_message_str().strip()
+        parts = message_text.split()
+        
+        if len(parts) < 2:
+            # 显示当前速度设置
+            yield event.plain_result(f"当前音频播放速度：{self.speed}\n\n使用方法：/speed <速度值>\n\n示例：\n/speed 1.0  # 正常速度\n/speed 1.5  # 1.5倍速\n/speed 0.5  # 0.5倍速\n\n有效范围：0.25 - 4.0")
+            return
+        
+        try:
+            new_speed = float(parts[1])
+            
+            # 验证速度值范围
+            if new_speed < 0.25 or new_speed > 4.0:
+                yield event.plain_result("速度值必须在0.25-4.0之间！\n\n0.25表示最慢，4.0表示最快，1.0为正常速度。")
+                return
+            
+            # 更新速度设置
+            self.speed = new_speed
+            
+            if new_speed == 1.0:
+                yield event.plain_result("已设置音频播放速度为正常速度（1.0倍）。")
+            elif new_speed < 1.0:
+                yield event.plain_result(f"已设置音频播放速度为{new_speed}倍，语音将变慢。")
+            else:
+                yield event.plain_result(f"已设置音频播放速度为{new_speed}倍，语音将变快。")
+                
+        except ValueError:
+            yield event.plain_result("请输入有效的数字！\n\n示例：/speed 1.5")
+
+    @filter.command("gain", priority=1)
+    async def set_gain(self, event: AstrMessageEvent):
+        """设置音频增益"""
+        # 获取命令参数
+        message_text = event.get_message_str().strip()
+        parts = message_text.split()
+        
+        if len(parts) < 2:
+            # 显示当前增益设置
+            yield event.plain_result(f"当前音频增益：{self.gain}dB\n\n使用方法：/gain <增益值>\n\n示例：\n/gain 0    # 默认音量\n/gain 3    # 增加3dB（更响）\n/gain -3   # 减少3dB（更轻）\n\n有效范围：-10 到 10 dB")
+            return
+        
+        try:
+            new_gain = float(parts[1])
+            
+            # 验证增益值范围
+            if new_gain < -10 or new_gain > 10:
+                yield event.plain_result("增益值必须在-10到10之间！\n\n负值表示降低音量，正值表示提高音量，0为默认音量。")
+                return
+            
+            # 更新增益设置
+            self.gain = new_gain
+            
+            if new_gain == 0.0:
+                yield event.plain_result("已设置音频增益为默认值（0dB）。")
+            elif new_gain < 0:
+                yield event.plain_result(f"已设置音频增益为{new_gain}dB，音量将降低。")
+            else:
+                yield event.plain_result(f"已设置音频增益为{new_gain}dB，音量将提高。")
+                
+        except ValueError:
+            yield event.plain_result("请输入有效的数字！\n\n示例：/gain 3")
+
+    @filter.command("vitsinfo", priority=1)
+    async def vits_info(self, event: AstrMessageEvent):
+        """查看插件当前配置信息"""
+        info_text = f"VITS插件配置信息：\n"
+        info_text += f"状态：{'启用' if self.enabled else '禁用'}\n"
+        info_text += f"全局开关配置：{'启用' if self.config.get('global_enabled', False) else '禁用'}\n"
+        info_text += f"音色：{self.api_voice}\n"
+        info_text += f"播放速度：{self.speed}\n"
+        info_text += f"音频增益：{self.gain}dB\n"
+        info_text += f"转换概率：{self.tts_probability}%\n"
+        info_text += f"跳过关键词：{', '.join(self.skip_tts_keywords)}\n\n"
+        info_text += "说明：状态显示当前运行状态，全局开关配置显示重启后的默认状态"
+        yield event.plain_result(info_text)
 
     async def _create_speech_request(self, plain_text: str, output_audio_path: Path):
         """创建语音合成请求"""
         try:
-            client = OpenAI(
-                api_key=self.api_key,
-                base_url=self.api_url
-            )
-
-            # 判断音色类型并调用相应API
-            if self.api_voice.startswith('speech:'):
-                # 用户自定义音色
-                with client.audio.speech.with_streaming_response.create(
-                        model=self.api_name,
-                        voice=self.api_voice,  # 直接使用自定义音色URI
-                        input=plain_text,
-                        response_format="wav"
-                ) as response:
-                    response.stream_to_file(output_audio_path)
-                    return True
-            elif self.api_voice and ':' in self.api_voice:
-                # 系统预置音色
-                with client.audio.speech.with_streaming_response.create(
-                        model=self.api_name,
-                        voice=self.api_voice,
-                        input=plain_text,
-                        response_format="wav"
-                ) as response:
-                    response.stream_to_file(output_audio_path)
-                    return True
-            else:
-                # 音色配置错误
-                raise Exception("音色配置错误，请检查voice字段配置")
+            # 构建请求数据
+            request_data = {
+                "model": self.api_name,
+                "input": plain_text,
+                "response_format": "wav"
+            }
+            
+            # 添加音色参数
+            if self.api_voice:
+                request_data["voice"] = self.api_voice
+            
+            # 添加speed和gain参数
+            if self.speed != 1.0:
+                request_data["speed"] = self.speed
+            if self.gain != 0.0:
+                request_data["gain"] = self.gain
+            
+            # 设置请求头
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f"Bearer {self.api_key}"
+            }
+            
+            # 使用aiohttp发送请求
+            url = f"{self.api_url}/audio/speech"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=request_data, headers=headers) as response:
+                    if response.status == 200:
+                        # 将响应内容写入文件
+                        with open(output_audio_path, 'wb') as f:
+                            async for chunk in response.content.iter_chunked(8192):
+                                f.write(chunk)
+                        return True
+                    else:
+                        error_text = await response.text()
+                        raise Exception(f"API请求失败，状态码: {response.status}, 错误信息: {error_text}")
                 
         except Exception as e:
             logging.error(f"语音转换失败: {e}")
             raise e
 
-    @filter.on_decorating_result()
-    async def on_decorating_result(self, event: AstrMessageEvent):
-        # 插件是否启用
-        if not self.enabled:
-            return
+    async def _should_skip_tts(self, text: str) -> bool:
+        """检查是否应该跳过TTS转换"""
+        # 检测是否包含跳过TTS的关键词
+        for keyword in self.skip_tts_keywords:
+            if keyword.lower() in text.lower():
+                return True
+        
+        # 概率检测：根据设置的概率决定是否进行TTS转换
+        if self.tts_probability < 100:
+            # 生成1-100之间的随机数
+            random_num = random.randint(1, 100)
+            if random_num > self.tts_probability:
+                return True
+        
+        return False
 
-        # 获取事件结果
-        result = event.get_result()
+    async def _convert_to_speech(self, result):
+        """将文本结果转换为语音"""
         # 初始化plain_text变量
         plain_text = ""
         chain = result.chain
 
-        #遍历组件
+        # 遍历组件
         for comp in result.chain:
             if isinstance(comp, Image):  # 检测是否有Image组件
                 return  # 静默退出，不添加错误提示
@@ -322,17 +471,9 @@ class VITSPlugin(Star):
                 cleaned_text = re.sub(r'[()《》#%^&*+-_{}]', '', comp.text)
                 plain_text += cleaned_text
 
-        # 检测是否包含跳过TTS的关键词
-        for keyword in self.skip_tts_keywords:
-            if keyword.lower() in plain_text.lower():
-                return  # 包含关键词时静默退出，不进行语音转换
-
-        # 概率检测：根据设置的概率决定是否进行TTS转换
-        if self.tts_probability < 100:
-            # 生成1-100之间的随机数
-            random_num = random.randint(1, 100)
-            if random_num > self.tts_probability:
-                return  # 不满足概率条件，静默退出不进行语音转换
+        # 检查是否应该跳过TTS
+        if await self._should_skip_tts(plain_text):
+            return
 
         # 初始化输出音频路径
         output_audio_path = Path(__file__).parent / "miao.wav"
@@ -344,3 +485,13 @@ class VITSPlugin(Star):
         except Exception as e:
             logging.error(f"语音转换失败: {e}")
             chain.append(Plain(f"语音转换失败：{str(e)}"))
+
+    @filter.on_decorating_result()
+    async def on_decorating_result(self, event: AstrMessageEvent):
+        # 插件是否启用
+        if not self.enabled:
+            return
+
+        # 获取事件结果
+        result = event.get_result()
+        await self._convert_to_speech(result)
