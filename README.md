@@ -6,7 +6,7 @@
 ![img_2.png](img_2.png)
 ## 调用硅基流动API实现文本转语音插件。
 
-## 在线音色上传控制台网页**`https://voice.gbkgov.cn`**
+## 在线音色上传控制台网页[https://voice.gbkgov.cn](https://voice.gbkgov.cn)
 
 ## 需要在插件面板中配置以下内容：
 - **URL**
@@ -113,5 +113,6 @@ FunAudioLLM/CosyVoice2-0.5B模型，
 - v1.3.0 ——  新增音色快速切换、概率控制、关键词过滤等功能
 - v1.4.0 ——  新增音频播放速度(speed)和音频增益(gain)控制功能
 - v1.5.0 ——  新增TTS 最大字符数限制，修改部分代码以适应 AstrBot 稳定版本 v3.5.27
+
 
 
