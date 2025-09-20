@@ -25,7 +25,7 @@
         "description": "跳过TTS的关键词列表",
         "type": "list",
         "hint": "当回复包含这些关键词时，将跳过语音转换，直接回复文字（不区分大小写）",
-        "default": ["astrbot", "https", "http", "www.", ".com", ".cn", "链接", "网址", "入群", "退群", "涩图", "语音", "音色", "音频", "tts", "转换"]
+        "default": ["astrbot", "llm", "plugin", "http", "www.", ".com", "reset", ".cn", "链接", "网址", "入群", "退群", "涩图", "语音", "音色", "错误类型", "tts", "转换", "切换", "新对话", "提供商", "列表", "模型"]
     },
     "tts_probability": {
         "description": "TTS转换概率",
@@ -45,10 +45,16 @@
         "hint": "音频增益，单位dB，控制音频声音大小，float类型，默认值是0.0，可选范围是[-10,10]",
         "default": 0.0
     },
+    "max_tts_chars": {
+        "description": "TTS 最大字符数",
+        "type": "int",
+        "hint": "当文本长度超过该值时，将跳过TTS转换。设置0或负数表示不限制。",
+        "default": 0
+    },
     "global_enabled": {
         "description": "全局TTS状态保存",
         "type": "bool",
-        "hint": "控制TTS功能的全局开关状态，开启后则不会因为重启框架或重载插件而改变状态",
+        "hint": "控制TTS功能的全局开关状态，开启后则不会因为重启框架或重载插件而改变TTS功能开关状态",
         "default": true
     }
 }

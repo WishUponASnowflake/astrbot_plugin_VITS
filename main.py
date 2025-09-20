@@ -1,17 +1,16 @@
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
-from astrbot.api.message_components import Record, Plain, Image
+from astrbot.api.message_components import Record, Plain, Image, At, Reply, AtAll
 from pathlib import Path
-from openai import OpenAI
 import logging
 import re
 import aiohttp
 import json
 import random
-import os
+import asyncio
 
 # 注册插件的装饰器
-@register("VITSPlugin", "第九位魔神/Chris95743", "语音合成插件", "1.4.0")
+@register("VITSPlugin", "第九位魔神/Chris95743", "语音合成插件", "1.5.0")
 class VITSPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -26,6 +25,31 @@ class VITSPlugin(Star):
         self.speed = config.get('speed', 1.0)  # 音频播放速度
         self.gain = config.get('gain', 0.0)  # 音频增益
         self.enabled = config.get('global_enabled', False)  # 从配置读取全局开关状态
+        self.max_tts_chars = int(config.get('max_tts_chars', 0))  # 超过该长度跳过TTS，0为不限制
+        # 规范化基础 URL，移除多余斜杠
+        if isinstance(self.api_url, str):
+            self.api_url = self.api_url.rstrip('/')
+        # 规范化跳过关键词列表
+        self.skip_tts_keywords = self._normalize_skip_keywords(self.skip_tts_keywords)
+        # 简易去重缓存，避免同一会话短时间内重复合成
+        self._recent_tts = {}
+        self._dedup_ttl_seconds = 10
+        # 固定音频输出文件与并发写入锁
+        self._tts_file_path = Path(__file__).parent / "miao.wav"
+        self._tts_lock = asyncio.Lock()
+
+    def _get_system_voices_dict(self):
+        """预置系统音色，统一管理，保持插入顺序"""
+        return {
+            "alex": "沉稳男声",
+            "benjamin": "低沉男声",
+            "charles": "磁性男声",
+            "david": "欢快男声",
+            "anna": "沉稳女声",
+            "bella": "激情女声",
+            "claire": "温柔女声",
+            "diana": "欢快女声",
+        }
 
     def _save_global_enabled_state(self, enabled: bool):
         """保存全局启用状态到配置"""
@@ -62,6 +86,70 @@ class VITSPlugin(Star):
                 
         except Exception as e:
             logging.error(f"保存TTS开关状态失败: {e}")
+
+    def _normalize_skip_keywords(self, keywords):
+        """将 skip 关键词规范化为去空格小写列表；若为空，使用内置默认"""
+        try:
+            raw = keywords
+            items = []
+            if isinstance(raw, str):
+                # 先按逗号分，再按空白分
+                parts = []
+                for seg in raw.split(','):
+                    parts.extend(seg.split())
+                items = parts
+            elif isinstance(raw, (list, tuple, set)):
+                items = list(raw)
+            else:
+                items = []
+
+            normalized = []
+            for it in items:
+                try:
+                    s = str(it).strip().lower()
+                except Exception:
+                    continue
+                if s:
+                    normalized.append(s)
+
+            if not normalized:
+                # 内置默认（含中英混合关键词）
+                normalized = [
+                    "astrbot", "llm", "http", "https", "www.", ".com", ".cn", "reset",
+                    "链接", "网址", "入群", "退群", "涩图", "语音", "音色", "错误类型", "tts", "转换", "新对话", "服务提供商", "列表"
+                ]
+
+            return normalized
+        except Exception:
+            return [
+                "astrbot", "llm", "http", "https", "www.", ".com", ".cn", "reset",
+                "链接", "网址", "入群", "退群", "涩图", "语音", "音色", "错误类型", "tts", "转换", "新对话", "服务提供商", "列表"
+            ]
+
+    def _save_config_field(self, key: str, value):
+        """保存单个配置字段到配置文件或由宿主框架持久化"""
+        try:
+            self.config[key] = value
+            if hasattr(self.context, 'save_config'):
+                self.context.save_config(self.config)
+            elif hasattr(self.context, 'update_config'):
+                self.context.update_config(key, value)
+            else:
+                config_dir = Path(__file__).parent
+                config_file = config_dir / "config.json"
+                existing_config = {}
+                if config_file.exists():
+                    try:
+                        with open(config_file, 'r', encoding='utf-8') as f:
+                            existing_config = json.load(f)
+                    except Exception:
+                        pass
+                existing_config[key] = value
+                with open(config_file, 'w', encoding='utf-8') as f:
+                    json.dump(existing_config, f, ensure_ascii=False, indent=2)
+            logging.info(f"已保存配置项 {key} = {value}")
+        except Exception as e:
+            logging.error(f"保存配置项失败 {key}: {e}")
 
     @filter.command("vits", priority=1)
     async def vits(self, event: AstrMessageEvent):
@@ -126,18 +214,8 @@ class VITSPlugin(Star):
             
             # 系统预置音色
             voice_info += "系统预置音色：\n"
-            system_voices = [
-                ("alex", "沉稳男声"),
-                ("benjamin", "低沉男声"), 
-                ("charles", "磁性男声"),
-                ("david", "欢快男声"),
-                ("anna", "沉稳女声"),
-                ("bella", "激情女声"),
-                ("claire", "温柔女声"),
-                ("diana", "欢快女声")
-            ]
-            
-            for voice_id, voice_desc in system_voices:
+            system_voices = self._get_system_voices_dict()
+            for voice_id, voice_desc in system_voices.items():
                 voice_info += f"• {voice_id} - {voice_desc}\n"
                 voice_info += f"  {self.api_name}:{voice_id}\n\n"
             
@@ -198,16 +276,7 @@ class VITSPlugin(Star):
         voice_name_lower = voice_name.lower()
         
         # 预定义的系统音色
-        system_voices = {
-            "alex": "沉稳男声",
-            "benjamin": "低沉男声", 
-            "charles": "磁性男声",
-            "david": "欢快男声",
-            "anna": "沉稳女声",
-            "bella": "激情女声",
-            "claire": "温柔女声",
-            "diana": "欢快女声"
-        }
+        system_voices = self._get_system_voices_dict()
         
         # 获取用户自定义音色列表
         custom_voices = {}
@@ -253,6 +322,8 @@ class VITSPlugin(Star):
             # 构建新的音色配置
             new_voice = f"{self.api_name}:{voice_name_lower}"
             self.api_voice = new_voice
+            # 持久化
+            self._save_config_field('voice', new_voice)
             
             voice_desc = system_voices[voice_name_lower]
             yield event.plain_result(f"已切换到系统音色：{voice_name_lower} ({voice_desc})\n配置：{new_voice}")
@@ -262,6 +333,8 @@ class VITSPlugin(Star):
             # 使用自定义音色的完整URI
             new_voice = custom_voices[voice_name]
             self.api_voice = new_voice
+            # 持久化
+            self._save_config_field('voice', new_voice)
             
             yield event.plain_result(f"已切换到自定义音色：{voice_name}\n配置：{new_voice}")
         
@@ -305,6 +378,8 @@ class VITSPlugin(Star):
             
             # 更新概率设置
             self.tts_probability = new_probability
+            # 持久化
+            self._save_config_field('tts_probability', new_probability)
             
             if new_probability == 0:
                 yield event.plain_result("已设置TTS转换概率为0%，将不会进行语音转换。")
@@ -338,6 +413,8 @@ class VITSPlugin(Star):
             
             # 更新速度设置
             self.speed = new_speed
+            # 持久化
+            self._save_config_field('speed', new_speed)
             
             if new_speed == 1.0:
                 yield event.plain_result("已设置音频播放速度为正常速度（1.0倍）。")
@@ -371,6 +448,8 @@ class VITSPlugin(Star):
             
             # 更新增益设置
             self.gain = new_gain
+            # 持久化
+            self._save_config_field('gain', new_gain)
             
             if new_gain == 0.0:
                 yield event.plain_result("已设置音频增益为默认值（0dB）。")
@@ -392,6 +471,7 @@ class VITSPlugin(Star):
         info_text += f"播放速度：{self.speed}\n"
         info_text += f"音频增益：{self.gain}dB\n"
         info_text += f"转换概率：{self.tts_probability}%\n"
+        info_text += f"最大TTS字符：{self.max_tts_chars if self.max_tts_chars > 0 else '不限制'}\n"
         info_text += f"跳过关键词：{', '.join(self.skip_tts_keywords)}\n\n"
         info_text += "说明：状态显示当前运行状态，全局开关配置显示重启后的默认状态"
         yield event.plain_result(info_text)
@@ -443,9 +523,13 @@ class VITSPlugin(Star):
 
     async def _should_skip_tts(self, text: str) -> bool:
         """检查是否应该跳过TTS转换"""
+        # 长度阈值检查
+        if isinstance(self.max_tts_chars, int) and self.max_tts_chars > 0 and len(text) > self.max_tts_chars:
+            return True
         # 检测是否包含跳过TTS的关键词
+        text_lower = text.lower()
         for keyword in self.skip_tts_keywords:
-            if keyword.lower() in text.lower():
+            if keyword in text_lower:
                 return True
         
         # 概率检测：根据设置的概率决定是否进行TTS转换
@@ -457,31 +541,80 @@ class VITSPlugin(Star):
         
         return False
 
-    async def _convert_to_speech(self, result):
+    def _is_duplicate_request(self, session_key: str, text: str) -> bool:
+        """检查并标记重复请求，避免短时间内相同文本重复TTS"""
+        try:
+            import time
+            now = time.time()
+            # 清理过期项
+            if len(self._recent_tts) > 256:
+                to_delete = []
+                for k, ts in self._recent_tts.items():
+                    if now - ts > self._dedup_ttl_seconds:
+                        to_delete.append(k)
+                for k in to_delete:
+                    self._recent_tts.pop(k, None)
+
+            key = f"{session_key}:{hash(text)}"
+            ts = self._recent_tts.get(key)
+            if ts and (now - ts) <= self._dedup_ttl_seconds:
+                return True
+            self._recent_tts[key] = now
+            return False
+        except Exception:
+            return False
+
+    async def _convert_to_speech(self, event: AstrMessageEvent, result, session_key: str):
         """将文本结果转换为语音"""
         # 初始化plain_text变量
         plain_text = ""
         chain = result.chain
 
         # 遍历组件
+        # 如果结果中已经存在语音记录，则不再进行二次转换
+        try:
+            for comp in chain:
+                if isinstance(comp, Record):
+                    return
+        except Exception:
+            pass
+
         for comp in result.chain:
-            if isinstance(comp, Image):  # 检测是否有Image组件
+            # 图片 / @ / 回复 等场景跳过语音
+            if isinstance(comp, (Image, At, AtAll, Reply)):
                 return  # 静默退出，不添加错误提示
             if isinstance(comp, Plain):
                 cleaned_text = re.sub(r'[()《》#%^&*+-_{}]', '', comp.text)
                 plain_text += cleaned_text
 
+        # 清理首尾空白并校验是否为空
+        plain_text = plain_text.strip()
+        if not plain_text:
+            return
+
+        # 去重：同一会话短时间内相同文本不重复合成
+        if self._is_duplicate_request(session_key, plain_text):
+            return
+
         # 检查是否应该跳过TTS
         if await self._should_skip_tts(plain_text):
             return
 
-        # 初始化输出音频路径
-        output_audio_path = Path(__file__).parent / "miao.wav"
+        # 固定输出文件路径，使用临时文件+原子替换并加锁避免并发冲突
+        final_audio_path = self._tts_file_path
+        tmp_audio_path = final_audio_path.with_suffix('.tmp.wav')
 
         try:
-            success = await self._create_speech_request(plain_text, output_audio_path)
-            if success:
-                result.chain = [Record(file=str(output_audio_path))]
+            async with self._tts_lock:
+                success = await self._create_speech_request(plain_text, tmp_audio_path)
+                if success:
+                    # 原子替换到最终文件
+                    tmp_audio_path.replace(final_audio_path)
+                    result.chain = [Record(file=str(final_audio_path))]
+                    try:
+                        event.set_extra('vits_sent', True)
+                    except Exception:
+                        pass
         except Exception as e:
             logging.error(f"语音转换失败: {e}")
             chain.append(Plain(f"语音转换失败：{str(e)}"))
@@ -491,7 +624,21 @@ class VITSPlugin(Star):
         # 插件是否启用
         if not self.enabled:
             return
+        # 去重：同一事件只处理一次
+        try:
+            if event.get_extra('vits_processed'):
+                # 如果已经发送过，清理结果，避免再次发送
+                if event.get_extra('vits_sent'):
+                    event.clear_result()
+                return
+            event.set_extra('vits_processed', True)
+        except Exception:
+            pass
 
         # 获取事件结果
         result = event.get_result()
-        await self._convert_to_speech(result)
+        if result is None:
+            return
+        # 传递会话键，用于去重
+        session_key = getattr(event, 'unified_msg_origin', None) or event.get_session_id()
+        await self._convert_to_speech(event, result, session_key)
